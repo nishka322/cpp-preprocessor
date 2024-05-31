@@ -10,12 +10,70 @@
 using namespace std;
 using filesystem::path;
 
-path operator""_p(const char* data, std::size_t sz) {
+path operator""_p(const char* data, size_t sz) {
     return path(data, data + sz);
 }
 
-// напишите эту функцию
-bool Preprocess(const path& in_file, const path& out_file, const vector<path>& include_directories);
+
+bool Preprocess(const path& in_file, const path& out_file, const vector<path>& include_directories) {
+    ifstream input(in_file);
+    if (!input.is_open()) {
+        cerr << "Failed to open input file: " << in_file << endl;
+        return false;
+    }
+
+    ofstream output(out_file, ios_base::app);  // Append mode
+    if (!output.is_open()) {
+        cerr << "Failed to open output file: " << out_file << endl;
+        return false;
+    }
+
+    string line;
+    static regex include_local (R"/(\s*#\s*include\s*"([^"]*)"\s*)/");
+    static regex include_global (R"/(\s*#\s*include\s*<([^>]*)>\s*)/");
+    size_t line_number = 0;
+
+    while (getline(input, line)) {
+        line_number++;
+        smatch match;
+        if (regex_match(line, match, include_local) || regex_match(line, match, include_global)) {
+            path include_file = match[1].str();
+            bool found = false;
+
+            if (match[0].str().find('"') != string::npos) { // Local include
+                path relative_path = in_file.parent_path() / include_file;
+                if (exists(relative_path)) {
+                    found = true;
+                    if (!Preprocess(relative_path, out_file, include_directories)) {
+                        return false;
+                    }
+                }
+            }
+
+            if (!found) { // Global include or local include not found
+                for (const auto& dir : include_directories) {
+                    path search_path = dir / include_file;
+                    if (exists(search_path)) {
+                        found = true;
+                        if (!Preprocess(search_path, out_file, include_directories)) {
+                            return false;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
+                cout << "unknown include file " << include_file.string() << " at file " << in_file.string() << " at line " << line_number << endl;
+                return false;
+            }
+        } else {
+            output << line << endl;
+        }
+    }
+
+    return true;
+}
 
 string GetFileContents(string file) {
     ifstream stream(file);
@@ -71,7 +129,7 @@ void Test() {
     }
 
     assert((!Preprocess("sources"_p / "a.cpp"_p, "sources"_p / "a.in"_p,
-                                  {"sources"_p / "include1"_p,"sources"_p / "include2"_p})));
+                        {"sources"_p / "include1"_p,"sources"_p / "include2"_p})));
 
     ostringstream test_out;
     test_out << "// this comment before include\n"
